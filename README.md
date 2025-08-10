@@ -1,10 +1,10 @@
-# sim86 - 8086 Emulator
+# sim86 - 8086 Simulator
 
-This is a simple emulator for the Intel 8086 processor written in Rust.
+This is a simple simmulator for the Intel 8086 processor written in Rust.
 
 ## Building
 
-To build the emulator, you will need to have Rust and Cargo installed. You can then build the project by running:
+To build the simulator, you will need to have Rust and Cargo installed. You can then build the project by running:
 
 ```bash
 cargo build
