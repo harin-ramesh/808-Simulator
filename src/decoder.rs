@@ -1,209 +1,13 @@
-use std::env;
 use std::fs::File;
-use std::io::{self, Read, Write};
+use std::io::{self, Read};
 
-// Type aliases matching the original C++ types
-type U8 = u8;
-type U16 = u16;
-type U32 = u32;
-type S16 = i16;
-type S32 = i32;
-type B32 = bool;
+use crate::instruction_formats::{
+    get_instruction_formats,
+    OperationType, InstructionBitsUsage, InstructionFormat,
+};
 
-// Constants
 const MEMORY_SIZE: usize = 1024 * 1024;
 const MEMORY_ACCESS_MASK: u32 = 0xfffff;
-
-// Enums
-#[derive(Debug, Clone, Copy, PartialEq)]
-#[repr(u32)]
-pub enum OperationType {
-    None = 0,
-    Mov,
-    Push,
-    Pop,
-    Xchg,
-    In,
-    Out,
-    Xlat,
-    Lea,
-    Lds,
-    Les,
-    Lahf,
-    Sahf,
-    Pushf,
-    Popf,
-    Add,
-    Adc,
-    Inc,
-    Aaa,
-    Daa,
-    Sub,
-    Sbb,
-    Dec,
-    Neg,
-    Cmp,
-    Aas,
-    Das,
-    Mul,
-    Imul,
-    Aam,
-    Div,
-    Idiv,
-    Aad,
-    Cbw,
-    Cwd,
-    Not,
-    Shl,
-    Sal,
-    Shr,
-    Sar,
-    Rol,
-    Ror,
-    Rcl,
-    Rcr,
-    And,
-    Test,
-    Or,
-    Xor,
-    Rep,
-    Call,
-    Jmp,
-    Ret,
-    Retf,
-    Je,
-    Jl,
-    Jle,
-    Jb,
-    Jbe,
-    Jp,
-    Jo,
-    Js,
-    Jne,
-    Jnl,
-    Jg,
-    Jnb,
-    Ja,
-    Jnp,
-    Jno,
-    Jns,
-    Loop,
-    Loopz,
-    Loopnz,
-    Jcxz,
-    Int,
-    Int3,
-    Into,
-    Iret,
-    Clc,
-    Cmc,
-    Stc,
-    Cld,
-    Std,
-    Cli,
-    Sti,
-    Hlt,
-    Wait,
-    Esc,
-    Lock,
-    Segment,
-}
-
-impl OperationType {
-    fn mnemonic(&self) -> &'static str {
-        match self {
-            OperationType::None => "",
-            OperationType::Mov => "mov",
-            OperationType::Push => "push",
-            OperationType::Pop => "pop",
-            OperationType::Xchg => "xchg",
-            OperationType::In => "in",
-            OperationType::Out => "out",
-            OperationType::Xlat => "xlat",
-            OperationType::Lea => "lea",
-            OperationType::Lds => "lds",
-            OperationType::Les => "les",
-            OperationType::Lahf => "lahf",
-            OperationType::Sahf => "sahf",
-            OperationType::Pushf => "pushf",
-            OperationType::Popf => "popf",
-            OperationType::Add => "add",
-            OperationType::Adc => "adc",
-            OperationType::Inc => "inc",
-            OperationType::Aaa => "aaa",
-            OperationType::Daa => "daa",
-            OperationType::Sub => "sub",
-            OperationType::Sbb => "sbb",
-            OperationType::Dec => "dec",
-            OperationType::Neg => "neg",
-            OperationType::Cmp => "cmp",
-            OperationType::Aas => "aas",
-            OperationType::Das => "das",
-            OperationType::Mul => "mul",
-            OperationType::Imul => "imul",
-            OperationType::Aam => "aam",
-            OperationType::Div => "div",
-            OperationType::Idiv => "idiv",
-            OperationType::Aad => "aad",
-            OperationType::Cbw => "cbw",
-            OperationType::Cwd => "cwd",
-            OperationType::Not => "not",
-            OperationType::Shl => "shl",
-            OperationType::Sal => "sal",
-            OperationType::Shr => "shr",
-            OperationType::Sar => "sar",
-            OperationType::Rol => "rol",
-            OperationType::Ror => "ror",
-            OperationType::Rcl => "rcl",
-            OperationType::Rcr => "rcr",
-            OperationType::And => "and",
-            OperationType::Test => "test",
-            OperationType::Or => "or",
-            OperationType::Xor => "xor",
-            OperationType::Rep => "rep",
-            OperationType::Call => "call",
-            OperationType::Jmp => "jmp",
-            OperationType::Ret => "ret",
-            OperationType::Retf => "retf",
-            OperationType::Je => "je",
-            OperationType::Jl => "jl",
-            OperationType::Jle => "jle",
-            OperationType::Jb => "jb",
-            OperationType::Jbe => "jbe",
-            OperationType::Jp => "jp",
-            OperationType::Jo => "jo",
-            OperationType::Js => "js",
-            OperationType::Jne => "jne",
-            OperationType::Jnl => "jnl",
-            OperationType::Jg => "jg",
-            OperationType::Jnb => "jnb",
-            OperationType::Ja => "ja",
-            OperationType::Jnp => "jnp",
-            OperationType::Jno => "jno",
-            OperationType::Jns => "jns",
-            OperationType::Loop => "loop",
-            OperationType::Loopz => "loopz",
-            OperationType::Loopnz => "loopnz",
-            OperationType::Jcxz => "jcxz",
-            OperationType::Int => "int",
-            OperationType::Int3 => "int3",
-            OperationType::Into => "into",
-            OperationType::Iret => "iret",
-            OperationType::Clc => "clc",
-            OperationType::Cmc => "cmc",
-            OperationType::Stc => "stc",
-            OperationType::Cld => "cld",
-            OperationType::Std => "std",
-            OperationType::Cli => "cli",
-            OperationType::Sti => "sti",
-            OperationType::Hlt => "hlt",
-            OperationType::Wait => "wait",
-            OperationType::Esc => "esc",
-            OperationType::Lock => "lock",
-            OperationType::Segment => "segment",
-        }
-    }
-}
 
 #[derive(Debug, Clone, Copy)]
 pub struct InstructionFlag;
@@ -236,7 +40,7 @@ pub enum RegisterIndex {
 }
 
 impl RegisterIndex {
-    fn get_name(&self, offset: u8, count: u8) -> &'static str {
+    pub fn get_name(&self, offset: u8, count: u8) -> &'static str {
         match self {
             RegisterIndex::None => "",
             RegisterIndex::A => match (count, offset & 1) {
@@ -292,7 +96,7 @@ pub enum EffectiveAddressBase {
 }
 
 impl EffectiveAddressBase {
-    fn expression(&self) -> &'static str {
+    pub fn expression(&self) -> &'static str {
         match self {
             EffectiveAddressBase::Direct => "",
             EffectiveAddressBase::BxSi => "bx+si",
@@ -311,14 +115,14 @@ impl EffectiveAddressBase {
 pub struct EffectiveAddressExpression {
     pub segment: RegisterIndex,
     pub base: EffectiveAddressBase,
-    pub displacement: S32,
+    pub displacement: i32,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct RegisterAccess {
     pub index: RegisterIndex,
-    pub offset: U8,
-    pub count: U8,
+    pub offset: u8,
+    pub count: u8,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -335,8 +139,8 @@ pub struct InstructionOperand {
     pub operand_type: OperandType,
     pub address: EffectiveAddressExpression,
     pub register: RegisterAccess,
-    pub immediate_u32: U32,
-    pub immediate_s32: S32,
+    pub immediate_u32: u32,
+    pub immediate_s32: u32,
 }
 
 impl Default for InstructionOperand {
@@ -361,10 +165,10 @@ impl Default for InstructionOperand {
 
 #[derive(Debug, Clone)]
 pub struct Instruction {
-    pub address: U32,
-    pub size: U32,
+    pub address: u32,
+    pub size: u32,
     pub op: OperationType,
-    pub flags: U32,
+    pub flags: u32,
     pub operands: [InstructionOperand; 2],
 }
 
@@ -382,7 +186,7 @@ impl Default for Instruction {
 
 // Memory structure
 pub struct Memory {
-    pub bytes: [U8; MEMORY_SIZE],
+    pub bytes: [u8; MEMORY_SIZE],
 }
 
 impl Memory {
@@ -392,12 +196,12 @@ impl Memory {
         }
     }
 
-    pub fn read(&self, absolute_address: U32) -> U8 {
+    pub fn read(&self, absolute_address: u32) -> u8 {
         assert!((absolute_address as usize) < self.bytes.len());
         self.bytes[absolute_address as usize]
     }
 
-    pub fn load_from_file(&mut self, filename: &str, at_offset: U32) -> io::Result<U32> {
+    pub fn load_from_file(&mut self, filename: &str, at_offset: u32) -> io::Result<u32> {
         if (at_offset as usize) >= self.bytes.len() {
             return Ok(0);
         }
@@ -412,14 +216,14 @@ impl Memory {
         self.bytes[at_offset as usize..at_offset as usize + bytes_to_copy]
             .copy_from_slice(&buffer[..bytes_to_copy]);
             
-        Ok(bytes_to_copy as U32)
+        Ok(bytes_to_copy as u32)
     }
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct SegmentedAccess {
-    pub segment_base: U16,
-    pub segment_offset: U16,
+    pub segment_base: u16,
+    pub segment_offset: u16,
 }
 
 impl Default for SegmentedAccess {
@@ -432,54 +236,16 @@ impl Default for SegmentedAccess {
 }
 
 impl SegmentedAccess {
-    pub fn get_absolute_address(&self, additional_offset: U16) -> U32 {
-        let result = (((self.segment_base as U32) << 4) + 
-                     (self.segment_offset + additional_offset) as U32) & MEMORY_ACCESS_MASK;
+    pub fn get_absolute_address(&self, additional_offset: u16) -> u32 {
+        let result = (((self.segment_base as u32) << 4) + 
+                     (self.segment_offset + additional_offset) as u32) & MEMORY_ACCESS_MASK;
         result
     }
 }
 
-// Instruction bits and decoding
-#[derive(Debug, Clone, Copy, PartialEq)]
-#[repr(u8)]
-pub enum InstructionBitsUsage {
-    Literal,
-    Mod,
-    Reg,
-    Rm,
-    Sr,
-    Disp,
-    Data,
-    HasDisp,
-    DispAlwaysW,
-    HasData,
-    WMakesDataW,
-    RmRegAlwaysW,
-    RelJmpDisp,
-    D,
-    S,
-    W,
-    V,
-    Z,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct InstructionBits {
-    pub usage: InstructionBitsUsage,
-    pub bit_count: U8,
-    pub shift: U8,
-    pub value: U8,
-}
-
-#[derive(Debug, Clone)]
-pub struct InstructionFormat {
-    pub op: OperationType,
-    pub bits: Vec<InstructionBits>,
-}
-
 pub struct DisasmContext {
     pub default_segment: RegisterIndex,
-    pub additional_flags: U32,
+    pub additional_flags: u32,
 }
 
 impl DisasmContext {
@@ -510,53 +276,7 @@ impl DisasmContext {
     }
 }
 
-// Simple instruction table - in a real implementation, this would be more comprehensive
-fn get_instruction_formats() -> Vec<InstructionFormat> {
-    vec![
-        // MOV register/memory to/from register - 100010dw mod reg r/m
-        InstructionFormat {
-            op: OperationType::Mov,
-            bits: vec![
-                InstructionBits { usage: InstructionBitsUsage::Literal, bit_count: 6, shift: 0, value: 0b100010 },
-                InstructionBits { usage: InstructionBitsUsage::D, bit_count: 1, shift: 0, value: 0 },
-                InstructionBits { usage: InstructionBitsUsage::W, bit_count: 1, shift: 0, value: 0 },
-                InstructionBits { usage: InstructionBitsUsage::Mod, bit_count: 2, shift: 0, value: 0 },
-                InstructionBits { usage: InstructionBitsUsage::Reg, bit_count: 3, shift: 0, value: 0 },
-                InstructionBits { usage: InstructionBitsUsage::Rm, bit_count: 3, shift: 0, value: 0 },
-            ],
-        },
-        // MOV immediate to register - 1011wreg data
-        InstructionFormat {
-            op: OperationType::Mov,
-            bits: vec![
-                InstructionBits { usage: InstructionBitsUsage::Literal, bit_count: 4, shift: 0, value: 0b1011 },
-                InstructionBits { usage: InstructionBitsUsage::W, bit_count: 1, shift: 0, value: 0 },
-                InstructionBits { usage: InstructionBitsUsage::Reg, bit_count: 3, shift: 0, value: 0 },
-                InstructionBits { usage: InstructionBitsUsage::HasData, bit_count: 0, shift: 0, value: 1 },
-                InstructionBits { usage: InstructionBitsUsage::WMakesDataW, bit_count: 0, shift: 0, value: 1 },
-            ],
-        },
-        InstructionFormat {
-            op: OperationType::Jmp,
-            bits: vec![
-                InstructionBits { usage: InstructionBitsUsage::Literal, bit_count: 8, shift: 0, value: 0xE9 },
-                InstructionBits { usage: InstructionBitsUsage::HasDisp, bit_count: 0, shift: 0, value: 1 },
-                InstructionBits { usage: InstructionBitsUsage::DispAlwaysW, bit_count: 0, shift: 0, value: 1 },
-                InstructionBits { usage: InstructionBitsUsage::RelJmpDisp, bit_count: 0, shift: 0, value: 1 },
-            ],
-        },
-        InstructionFormat {
-            op: OperationType::Je,
-            bits: vec![
-                InstructionBits { usage: InstructionBitsUsage::Literal, bit_count: 8, shift: 0, value: 0x74 },
-                InstructionBits { usage: InstructionBitsUsage::HasDisp, bit_count: 0, shift: 0, value: 1 },
-                InstructionBits { usage: InstructionBitsUsage::RelJmpDisp, bit_count: 0, shift: 0, value: 1 },
-            ],
-        },
-    ]
-}
-
-fn get_reg_operand(intel_reg_index: U32, wide: bool) -> InstructionOperand {
+fn get_reg_operand(intel_reg_index: u32, wide: bool) -> InstructionOperand {
     let reg_table = [
         [(RegisterIndex::A, 0, 1), (RegisterIndex::A, 0, 2)],
         [(RegisterIndex::C, 0, 1), (RegisterIndex::C, 0, 2)],
@@ -581,7 +301,7 @@ fn get_reg_operand(intel_reg_index: U32, wide: bool) -> InstructionOperand {
     }
 }
 
-fn parse_data_value(memory: &Memory, access: &mut SegmentedAccess, exists: bool, wide: bool, sign_extended: bool) -> U32 {
+fn parse_data_value(memory: &Memory, access: &mut SegmentedAccess, exists: bool, wide: bool, sign_extended: bool) -> u32 {
     if !exists {
         return 0;
     }
@@ -590,7 +310,7 @@ fn parse_data_value(memory: &Memory, access: &mut SegmentedAccess, exists: bool,
         let d0 = memory.read(access.get_absolute_address(0));
         let d1 = memory.read(access.get_absolute_address(1));
         access.segment_offset += 2;
-        ((d1 as U32) << 8) | (d0 as U32)
+        ((d1 as u32) << 8) | (d0 as u32)
     } else {
         let d = memory.read(access.get_absolute_address(0));
         access.segment_offset += 1;
@@ -618,16 +338,16 @@ pub fn decode_instruction(context: &DisasmContext, memory: &Memory, at: &mut Seg
 }
 
 fn try_decode(context: &DisasmContext, format: &InstructionFormat, memory: &Memory, mut at: SegmentedAccess) -> Option<Instruction> {
-    let mut dest = Instruction::default();
-    let mut bits = [0u32; 18]; // Assuming max 18 different bit types
+    let mut instruction = Instruction::default();
+    let mut bits = [0u32; 18];
     let mut has_bits = 0u32;
     let mut valid = true;
 
     let starting_address = at.get_absolute_address(0);
-    
+ 
     let mut bits_pending_count = 0u8;
     let mut bits_pending = 0u8;
-    
+
     for test_bits in &format.bits {
         if test_bits.usage == InstructionBitsUsage::Literal && test_bits.bit_count == 0 {
             break;
@@ -683,13 +403,13 @@ fn try_decode(context: &DisasmContext, format: &InstructionFormat, memory: &Memo
     bits[InstructionBitsUsage::Disp as usize] = parse_data_value(memory, &mut at, has_displacement, displacement_is_w, !displacement_is_w);
     bits[InstructionBitsUsage::Data as usize] = parse_data_value(memory, &mut at, bits[InstructionBitsUsage::HasData as usize] != 0, data_is_w, s);
 
-    dest.op = format.op;
-    dest.flags = context.additional_flags;
-    dest.address = starting_address;
-    dest.size = at.get_absolute_address(0) - starting_address;
+    instruction.op = format.op;
+    instruction.flags = context.additional_flags;
+    instruction.address = starting_address;
+    instruction.size = at.get_absolute_address(0) - starting_address;
     
     if w {
-        dest.flags |= InstructionFlag::WIDE;
+        instruction.flags |= InstructionFlag::WIDE;
     }
 
     let displacement = bits[InstructionBitsUsage::Disp as usize] as i16;
@@ -699,9 +419,9 @@ fn try_decode(context: &DisasmContext, format: &InstructionFormat, memory: &Memo
 
     // Handle segment register
     if (has_bits & (1 << (InstructionBitsUsage::Sr as usize))) != 0 {
-        dest.operands[reg_operand_index].operand_type = OperandType::Register;
+        instruction.operands[reg_operand_index].operand_type = OperandType::Register;
         let sr_val = bits[InstructionBitsUsage::Sr as usize] & 0x3;
-        dest.operands[reg_operand_index].register = RegisterAccess {
+        instruction.operands[reg_operand_index].register = RegisterAccess {
             index: match sr_val {
                 0 => RegisterIndex::Es,
                 1 => RegisterIndex::Cs,
@@ -716,22 +436,22 @@ fn try_decode(context: &DisasmContext, format: &InstructionFormat, memory: &Memo
 
     // Handle REG field
     if (has_bits & (1 << (InstructionBitsUsage::Reg as usize))) != 0 {
-        dest.operands[reg_operand_index] = get_reg_operand(bits[InstructionBitsUsage::Reg as usize], w);
+        instruction.operands[reg_operand_index] = get_reg_operand(bits[InstructionBitsUsage::Reg as usize], w);
     }
 
     // Handle MOD field
     if (has_bits & (1 << (InstructionBitsUsage::Mod as usize))) != 0 {
         if mod_val == 0b11 {
-            dest.operands[mod_operand_index] = get_reg_operand(rm, w || bits[InstructionBitsUsage::RmRegAlwaysW as usize] != 0);
+            instruction.operands[mod_operand_index] = get_reg_operand(rm, w || bits[InstructionBitsUsage::RmRegAlwaysW as usize] != 0);
         } else {
-            dest.operands[mod_operand_index].operand_type = OperandType::Memory;
-            dest.operands[mod_operand_index].address.segment = context.default_segment;
-            dest.operands[mod_operand_index].address.displacement = displacement as S32;
+            instruction.operands[mod_operand_index].operand_type = OperandType::Memory;
+            instruction.operands[mod_operand_index].address.segment = context.default_segment;
+            instruction.operands[mod_operand_index].address.displacement = displacement as i32;
 
             if (mod_val == 0b00) && (rm == 0b110) {
-                dest.operands[mod_operand_index].address.base = EffectiveAddressBase::Direct;
+                instruction.operands[mod_operand_index].address.base = EffectiveAddressBase::Direct;
             } else {
-                dest.operands[mod_operand_index].address.base = match rm {
+                instruction.operands[mod_operand_index].address.base = match rm {
                     0 => EffectiveAddressBase::BxSi,
                     1 => EffectiveAddressBase::BxDi,
                     2 => EffectiveAddressBase::BpSi,
@@ -747,130 +467,32 @@ fn try_decode(context: &DisasmContext, format: &InstructionFormat, memory: &Memo
     }
 
     // Handle additional operands
-    let last_operand_index = if dest.operands[0].operand_type != OperandType::None { 1 } else { 0 };
+    let last_operand_index = if instruction.operands[0].operand_type != OperandType::None { 1 } else { 0 };
 
     if bits[InstructionBitsUsage::RelJmpDisp as usize] != 0 {
-        dest.operands[last_operand_index].operand_type = OperandType::RelativeImmediate;
-        dest.operands[last_operand_index].immediate_s32 = displacement as S32 + dest.size as S32;
+        instruction.operands[last_operand_index].operand_type = OperandType::RelativeImmediate;
+        instruction.operands[last_operand_index].immediate_s32 = displacement as u32 + instruction.size as u32;
     }
 
     if bits[InstructionBitsUsage::HasData as usize] != 0 {
-        dest.operands[last_operand_index].operand_type = OperandType::Immediate;
-        dest.operands[last_operand_index].immediate_u32 = bits[InstructionBitsUsage::Data as usize];
+        instruction.operands[last_operand_index].operand_type = OperandType::Immediate;
+        instruction.operands[last_operand_index].immediate_u32 = bits[InstructionBitsUsage::Data as usize];
     }
 
     if (has_bits & (1 << (InstructionBitsUsage::V as usize))) != 0 {
         if bits[InstructionBitsUsage::V as usize] != 0 {
-            dest.operands[last_operand_index].operand_type = OperandType::Register;
-            dest.operands[last_operand_index].register = RegisterAccess {
+            instruction.operands[last_operand_index].operand_type = OperandType::Register;
+            instruction.operands[last_operand_index].register = RegisterAccess {
                 index: RegisterIndex::C,
                 offset: 0,
                 count: 1,
             };
         } else {
-            dest.operands[last_operand_index].operand_type = OperandType::Immediate;
-            dest.operands[last_operand_index].immediate_s32 = 1;
+            instruction.operands[last_operand_index].operand_type = OperandType::Immediate;
+            instruction.operands[last_operand_index].immediate_s32 = 1;
         }
     }
 
-    Some(dest)
-}
-
-// Text output functions
-pub fn is_printable(instruction: &Instruction) -> bool {
-    !matches!(instruction.op, OperationType::Lock | OperationType::Rep | OperationType::Segment)
-}
-
-pub fn print_instruction(instruction: &Instruction, output: &mut dyn Write) -> io::Result<()> {
-    let flags = instruction.flags;
-    let w = (flags & InstructionFlag::WIDE) != 0;
-
-    if (flags & InstructionFlag::LOCK) != 0 {
-        if instruction.op == OperationType::Xchg {
-            // Swap operands for xchg with lock prefix
-            write!(output, "lock ")?;
-        } else {
-            write!(output, "lock ")?;
-        }
-    }
-
-    let mut mnemonic_suffix = "";
-    if (flags & InstructionFlag::REP) != 0 {
-        write!(output, "rep ")?;
-        mnemonic_suffix = if w { "w" } else { "b" };
-    }
-
-    write!(output, "{}{} ", instruction.op.mnemonic(), mnemonic_suffix)?;
-
-    let mut separator = "";
-    for operand in &instruction.operands {
-        if operand.operand_type != OperandType::None {
-            write!(output, "{}", separator)?;
-            separator = ", ";
-
-            match operand.operand_type {
-                OperandType::None => {}
-                OperandType::Register => {
-                    write!(output, "{}", operand.register.index.get_name(operand.register.offset, operand.register.count))?;
-                }
-                OperandType::Memory => {
-                    let address = operand.address;
-
-                    if instruction.operands[0].operand_type != OperandType::Register {
-                        write!(output, "{} ", if w { "word" } else { "byte" })?;
-                    }
-
-                    if (flags & InstructionFlag::SEGMENT) != 0 {
-                        write!(output, "{}:", address.segment.get_name(0, 2))?;
-                    }
-
-                    write!(output, "[{}", address.base.expression())?;
-                    if address.displacement != 0 {
-                        write!(output, "{:+}", address.displacement)?;
-                    }
-                    write!(output, "]")?;
-                }
-                OperandType::Immediate => {
-                    write!(output, "{}", operand.immediate_s32)?;
-                }
-                OperandType::RelativeImmediate => {
-                    write!(output, "${:+}", operand.immediate_s32)?;
-                }
-            }
-        }
-    }
-
-    Ok(())
-}
-
-pub fn disasm_8086(memory: &Memory, disasm_byte_count: U32, disasm_start: SegmentedAccess) -> io::Result<()> {
-    let mut at = disasm_start;
-    let mut context = DisasmContext::new();
-    let mut count = disasm_byte_count;
-
-    while count > 0 {
-        let instruction = decode_instruction(&context, memory, &mut at);
-        
-        if instruction.op == OperationType::None {
-            eprintln!("ERROR: Unrecognized binary in instruction stream.");
-            break;
-        }
-
-        if count >= instruction.size {
-            count -= instruction.size;
-        } else {
-            eprintln!("ERROR: Instruction extends outside disassembly region");
-            break;
-        }
-
-        context.update(&instruction);
-        
-        if is_printable(&instruction) {
-            print_instruction(&instruction, &mut io::stdout())?;
-            println!();
-        }
-    }
-
-    Ok(())
+    Some(instruction)
 }
 
