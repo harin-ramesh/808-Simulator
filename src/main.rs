@@ -1,13 +1,11 @@
-mod decoder;
-mod instruction_formats;
-
 use std::io::{self, Write};
 
-use crate::{
+use sim86::{
     decoder::{
-        Memory, SegmentedAccess, Instruction, InstructionFlag, OperandType,
+        Instruction, InstructionFlag, OperandType,
         DisasmContext, decode_instruction,
     },
+    memory::{Memory, SegmentedAccess},
     instruction_formats::OperationType,
 };
 
@@ -21,7 +19,6 @@ pub fn print_instruction(instruction: &Instruction, output: &mut dyn Write) -> i
 
     if (flags & InstructionFlag::LOCK) != 0 {
         if instruction.op == OperationType::Xchg {
-            // Swap operands for xchg with lock prefix
             write!(output, "lock ")?;
         } else {
             write!(output, "lock ")?;
@@ -50,7 +47,11 @@ pub fn print_instruction(instruction: &Instruction, output: &mut dyn Write) -> i
                 OperandType::Memory => {
                     let address = operand.address;
 
-                    if instruction.operands[0].operand_type != OperandType::Register {
+                    if instruction.operands[0].operand_type != OperandType::Register
+                        && instruction.operands[1].operand_type != OperandType::Register
+                        && instruction.operands[0].operand_type != OperandType::RelativeImmediate
+                        && instruction.operands[1].operand_type != OperandType::RelativeImmediate
+                    {
                         write!(output, "{} ", if w { "word" } else { "byte" })?;
                     }
 
@@ -93,7 +94,7 @@ pub fn disasm_8086(memory: &Memory, disasm_byte_count: u32, disasm_start: Segmen
         if count >= instruction.size {
             count -= instruction.size;
         } else {
-            eprintln!("ERROR: Instruction extends outside disassembly region");
+            // eprintln!("ERROR: Instruction extends outside disassembly region");
             break;
         }
 
@@ -109,10 +110,15 @@ pub fn disasm_8086(memory: &Memory, disasm_byte_count: u32, disasm_start: Segmen
 }
 
 fn main() -> io::Result<()> {
-    //let args: Vec<String> = env::args().collect();
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() != 2 {
+        eprintln!("Usage: {} <filename>", args[0]);
+        return Ok(());
+    }
+
+    let filename = &args[1];
     let mut memory = Memory::new();
 
-    let filename = "listing_0038_many_register_mov";
     match memory.load_from_file(filename, 0) {
         Ok(bytes_read) => {
             println!("; {} disassembly:", filename);

@@ -1,13 +1,8 @@
-use std::fs::File;
-use std::io::{self, Read};
-
-use crate::instruction_formats::{
-    get_instruction_formats,
-    OperationType, InstructionBitsUsage, InstructionFormat,
+use crate::{
+    instruction_formats::{
+        get_instruction_formats, InstructionBits, InstructionBitsUsage, InstructionFormat, OperationType
+    }, memory::{Memory, SegmentedAccess}
 };
-
-const MEMORY_SIZE: usize = 1024 * 1024;
-const MEMORY_ACCESS_MASK: u32 = 0xfffff;
 
 #[derive(Debug, Clone, Copy)]
 pub struct InstructionFlag;
@@ -140,7 +135,7 @@ pub struct InstructionOperand {
     pub address: EffectiveAddressExpression,
     pub register: RegisterAccess,
     pub immediate_u32: u32,
-    pub immediate_s32: u32,
+    pub immediate_s32: i32,
 }
 
 impl Default for InstructionOperand {
@@ -181,65 +176,6 @@ impl Default for Instruction {
             flags: 0,
             operands: [InstructionOperand::default(); 2],
         }
-    }
-}
-
-// Memory structure
-pub struct Memory {
-    pub bytes: [u8; MEMORY_SIZE],
-}
-
-impl Memory {
-    pub fn new() -> Self {
-        Self {
-            bytes: [0; MEMORY_SIZE],
-        }
-    }
-
-    pub fn read(&self, absolute_address: u32) -> u8 {
-        assert!((absolute_address as usize) < self.bytes.len());
-        self.bytes[absolute_address as usize]
-    }
-
-    pub fn load_from_file(&mut self, filename: &str, at_offset: u32) -> io::Result<u32> {
-        if (at_offset as usize) >= self.bytes.len() {
-            return Ok(0);
-        }
-
-        let mut file = File::open(filename)?;
-        let mut buffer = Vec::new();
-        let bytes_read = file.read_to_end(&mut buffer)?;
-        
-        let available_space = self.bytes.len() - (at_offset as usize);
-        let bytes_to_copy = bytes_read.min(available_space);
-        
-        self.bytes[at_offset as usize..at_offset as usize + bytes_to_copy]
-            .copy_from_slice(&buffer[..bytes_to_copy]);
-            
-        Ok(bytes_to_copy as u32)
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct SegmentedAccess {
-    pub segment_base: u16,
-    pub segment_offset: u16,
-}
-
-impl Default for SegmentedAccess {
-    fn default() -> Self {
-        Self {
-            segment_base: 0,
-            segment_offset: 0,
-        }
-    }
-}
-
-impl SegmentedAccess {
-    pub fn get_absolute_address(&self, additional_offset: u16) -> u32 {
-        let result = (((self.segment_base as u32) << 4) + 
-                     (self.segment_offset + additional_offset) as u32) & MEMORY_ACCESS_MASK;
-        result
     }
 }
 
@@ -322,19 +258,6 @@ fn parse_data_value(memory: &Memory, access: &mut SegmentedAccess, exists: bool,
     };
 
     result
-}
-
-pub fn decode_instruction(context: &DisasmContext, memory: &Memory, at: &mut SegmentedAccess) -> Instruction {
-    let instruction_formats = get_instruction_formats();
-    
-    for format in &instruction_formats {
-        if let Some(instruction) = try_decode(context, format, memory, *at) {
-            at.segment_offset += instruction.size as u16;
-            return instruction;
-        }
-    }
-    
-    Instruction::default()
 }
 
 fn try_decode(context: &DisasmContext, format: &InstructionFormat, memory: &Memory, mut at: SegmentedAccess) -> Option<Instruction> {
@@ -471,12 +394,12 @@ fn try_decode(context: &DisasmContext, format: &InstructionFormat, memory: &Memo
 
     if bits[InstructionBitsUsage::RelJmpDisp as usize] != 0 {
         instruction.operands[last_operand_index].operand_type = OperandType::RelativeImmediate;
-        instruction.operands[last_operand_index].immediate_s32 = displacement as u32 + instruction.size as u32;
+        instruction.operands[last_operand_index].immediate_s32 = displacement as i32 + instruction.size as i32;
     }
 
     if bits[InstructionBitsUsage::HasData as usize] != 0 {
         instruction.operands[last_operand_index].operand_type = OperandType::Immediate;
-        instruction.operands[last_operand_index].immediate_u32 = bits[InstructionBitsUsage::Data as usize];
+        instruction.operands[last_operand_index].immediate_s32 = bits[InstructionBitsUsage::Data as usize] as i32;
     }
 
     if (has_bits & (1 << (InstructionBitsUsage::V as usize))) != 0 {
@@ -494,5 +417,18 @@ fn try_decode(context: &DisasmContext, format: &InstructionFormat, memory: &Memo
     }
 
     Some(instruction)
+}
+
+pub fn decode_instruction(context: &DisasmContext, memory: &Memory, at: &mut SegmentedAccess) -> Instruction {
+    let instruction_formats = get_instruction_formats();
+    
+    for format in &instruction_formats {
+        if let Some(instruction) = try_decode(context, format, memory, *at) {
+            at.segment_offset += instruction.size as u16;
+            return instruction;
+        }
+    }
+    
+    Instruction::default()
 }
 

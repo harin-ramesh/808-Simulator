@@ -1,5 +1,5 @@
 [package]
-name = "emulator_8086"
+name = "sim86"
 version = "0.1.0"
 edition = "2024"
 
