@@ -310,6 +310,7 @@ pub fn get_instruction_formats() -> Vec<InstructionFormat> {
                 InstructionBits { usage: InstructionBitsUsage::Literal, bit_count: 1, shift: 0, value: 0b0 },
                 InstructionBits { usage: InstructionBitsUsage::Sr, bit_count: 2, shift: 0, value: 0 },
                 InstructionBits { usage: InstructionBitsUsage::Rm, bit_count: 3, shift: 0, value: 0 },
+                InstructionBits { usage: InstructionBitsUsage::W, bit_count: 0, shift: 0, value: 1 },
             ],
         },
 

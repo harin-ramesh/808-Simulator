@@ -1,7 +1,9 @@
 use crate::{
     instruction_formats::{
         get_instruction_formats, InstructionBitsUsage, InstructionFormat, OperationType
-    }, memory::{Memory, SegmentedAccess}
+    },
+    memory::{Memory, SegmentedAccess},
+    register::{RegisterAccess, RegisterIndex, EffectiveAddressExpression, EffectiveAddressBase},
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -15,118 +17,11 @@ impl InstructionFlag {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-#[repr(u8)]
-pub enum RegisterIndex {
-    None = 0,
-    A,
-    B,
-    C,
-    D,
-    Sp,
-    Bp,
-    Si,
-    Di,
-    Es,
-    Cs,
-    Ss,
-    Ds,
-    Ip,
-    Flags,
-}
-
-impl RegisterIndex {
-    pub fn get_name(&self, offset: u8, count: u8) -> &'static str {
-        match self {
-            RegisterIndex::None => "",
-            RegisterIndex::A => match (count, offset & 1) {
-                (2, _) => "ax",
-                (1, 0) => "al",
-                (1, 1) => "ah",
-                _ => "ax",
-            },
-            RegisterIndex::B => match (count, offset & 1) {
-                (2, _) => "bx",
-                (1, 0) => "bl",
-                (1, 1) => "bh",
-                _ => "bx",
-            },
-            RegisterIndex::C => match (count, offset & 1) {
-                (2, _) => "cx",
-                (1, 0) => "cl",
-                (1, 1) => "ch",
-                _ => "cx",
-            },
-            RegisterIndex::D => match (count, offset & 1) {
-                (2, _) => "dx",
-                (1, 0) => "dl",
-                (1, 1) => "dh",
-                _ => "dx",
-            },
-            RegisterIndex::Sp => "sp",
-            RegisterIndex::Bp => "bp",
-            RegisterIndex::Si => "si",
-            RegisterIndex::Di => "di",
-            RegisterIndex::Es => "es",
-            RegisterIndex::Cs => "cs",
-            RegisterIndex::Ss => "ss",
-            RegisterIndex::Ds => "ds",
-            RegisterIndex::Ip => "ip",
-            RegisterIndex::Flags => "flags",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-#[repr(u8)]
-pub enum EffectiveAddressBase {
-    Direct = 0,
-    BxSi,
-    BxDi,
-    BpSi,
-    BpDi,
-    Si,
-    Di,
-    Bp,
-    Bx,
-}
-
-impl EffectiveAddressBase {
-    pub fn expression(&self) -> &'static str {
-        match self {
-            EffectiveAddressBase::Direct => "",
-            EffectiveAddressBase::BxSi => "bx+si",
-            EffectiveAddressBase::BxDi => "bx+di",
-            EffectiveAddressBase::BpSi => "bp+si",
-            EffectiveAddressBase::BpDi => "bp+di",
-            EffectiveAddressBase::Si => "si",
-            EffectiveAddressBase::Di => "di",  
-            EffectiveAddressBase::Bp => "bp",
-            EffectiveAddressBase::Bx => "bx",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct EffectiveAddressExpression {
-    pub segment: RegisterIndex,
-    pub base: EffectiveAddressBase,
-    pub displacement: i32,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct RegisterAccess {
-    pub index: RegisterIndex,
-    pub offset: u8,
-    pub count: u8,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Operand {
     None,
     Register(RegisterAccess),
     Memory(EffectiveAddressExpression),
-    ImmediateU32(u32),
-    ImmediateS32(i32),
+    Immediate(u32),
     RelativeImmediate(i32),
 }
 
@@ -165,7 +60,7 @@ pub struct DisasmContext {
 impl DisasmContext {
     pub fn new() -> Self {
         Self {
-            default_segment: RegisterIndex::Ds,
+            default_segment: RegisterIndex::DS,
             additional_flags: 0,
         }
     }
@@ -187,31 +82,34 @@ impl DisasmContext {
             }
             _ => {
                 self.additional_flags = 0;
-                self.default_segment = RegisterIndex::Ds;
+                self.default_segment = RegisterIndex::DS
             }
         }
     }
 }
 
 fn get_reg_operand(intel_reg_index: u32, wide: bool) -> Operand {
+    // eprint!("Intel Reg Index: {}, bool: {}", intel_reg_index, wide);
     let reg_table = [
         [(RegisterIndex::A, 0, 1), (RegisterIndex::A, 0, 2)],
         [(RegisterIndex::C, 0, 1), (RegisterIndex::C, 0, 2)],
         [(RegisterIndex::D, 0, 1), (RegisterIndex::D, 0, 2)],
         [(RegisterIndex::B, 0, 1), (RegisterIndex::B, 0, 2)],
-        [(RegisterIndex::A, 1, 1), (RegisterIndex::Sp, 0, 2)],
-        [(RegisterIndex::C, 1, 1), (RegisterIndex::Bp, 0, 2)],
-        [(RegisterIndex::D, 1, 1), (RegisterIndex::Si, 0, 2)],
-        [(RegisterIndex::B, 1, 1), (RegisterIndex::Di, 0, 2)],
+        [(RegisterIndex::A, 1, 1), (RegisterIndex::SP, 0, 2)],
+        [(RegisterIndex::C, 1, 1), (RegisterIndex::BP, 0, 2)],
+        [(RegisterIndex::D, 1, 1), (RegisterIndex::SI, 0, 2)],
+        [(RegisterIndex::B, 1, 1), (RegisterIndex::DI, 0, 2)],
     ];
 
     let (index, offset, count) = reg_table[(intel_reg_index & 0x7) as usize][if wide { 1 } else { 0 }];
  
-    Operand::Register(RegisterAccess {
-        index,
-        offset,
-        count,
-    })
+    Operand::Register(
+        RegisterAccess {
+            index,
+            offset,
+            count,
+        }
+    )
 }
 
 fn parse_data_value(memory: &Memory, access: &mut SegmentedAccess, exists: bool, wide: bool, sign_extended: bool) -> u32 {
@@ -322,11 +220,11 @@ fn try_decode(context: &DisasmContext, format: &InstructionFormat, memory: &Memo
         let sr_val = bits[InstructionBitsUsage::Sr as usize] & 0x3;
         instruction.operands[reg_operand_index] = Operand::Register(RegisterAccess {
             index: match sr_val {
-                0 => RegisterIndex::Es,
-                1 => RegisterIndex::Cs,
-                2 => RegisterIndex::Ss,
-                3 => RegisterIndex::Ds,
-                _ => RegisterIndex::Es,
+                0 => RegisterIndex::ES,
+                1 => RegisterIndex::CS,
+                2 => RegisterIndex::SS,
+                3 => RegisterIndex::DS,
+                _ => RegisterIndex::ES,
             },
             offset: 0,
             count: 2,
@@ -341,9 +239,9 @@ fn try_decode(context: &DisasmContext, format: &InstructionFormat, memory: &Memo
     // Handle MOD field
     if (has_bits & (1 << (InstructionBitsUsage::Mod as usize))) != 0 {
         if mod_val == 0b11 {
+            // eprint!("Mod value is 0b11, using register operand, w: {}", w);
             instruction.operands[mod_operand_index] = get_reg_operand(rm, w || bits[InstructionBitsUsage::RmRegAlwaysW as usize] != 0);
         } else {
-
             let base = if (mod_val == 0b00) && (rm == 0b110) {
                 EffectiveAddressBase::Direct
             } else {
@@ -378,19 +276,20 @@ fn try_decode(context: &DisasmContext, format: &InstructionFormat, memory: &Memo
     }
 
     if bits[InstructionBitsUsage::HasData as usize] != 0 {
-        instruction.operands[last_operand_index] = Operand::ImmediateS32(bits[InstructionBitsUsage::Data as usize] as i32);
+        instruction.operands[last_operand_index] = Operand::Immediate(bits[InstructionBitsUsage::Data as usize]);
     }
 
     if (has_bits & (1 << (InstructionBitsUsage::V as usize))) != 0 {
         if bits[InstructionBitsUsage::V as usize] != 0 {
             instruction.operands[last_operand_index] = Operand::Register(
                 RegisterAccess {
-                index: RegisterIndex::C,
-                offset: 0,
-                count: 1,
-            });
+                    index: RegisterIndex::C,
+                    offset: 0,
+                    count: 1,
+                }
+            );
         } else { 
-            instruction.operands[last_operand_index] = Operand::ImmediateS32(1);
+            instruction.operands[last_operand_index] = Operand::Immediate(1);
         }
     }
 

@@ -2,11 +2,11 @@ use std::io::{self, Write};
 
 use sim86::{
     decoder::{
-        Instruction, InstructionFlag, Operand,
-        DisasmContext, decode_instruction,
-    },
-    memory::{Memory, SegmentedAccess},
-    instruction_formats::OperationType,
+        decode_instruction, DisasmContext, Instruction, InstructionFlag, Operand,
+    }, 
+    instruction_formats::OperationType, memory::{Memory, SegmentedAccess},
+    register::RegisterFile,
+    execution_unit::execute_instruction,
 };
 
 pub fn is_printable(instruction: &Instruction) -> bool {
@@ -66,10 +66,7 @@ pub fn print_instruction(instruction: &Instruction, output: &mut dyn Write) -> i
                     }
                     write!(output, "]")?;
                 }
-                Operand::ImmediateU32(val) => {
-                    write!(output, "{}", val)?;
-                }
-                Operand::ImmediateS32(val) => {
+                Operand::Immediate(val) => {
                     write!(output, "{}", val)?;
                 }
                 Operand::RelativeImmediate(offset) => {
@@ -86,6 +83,7 @@ pub fn disasm_8086(memory: &Memory, disasm_byte_count: u32, disasm_start: Segmen
     let mut at = disasm_start;
     let mut context = DisasmContext::new();
     let mut count = disasm_byte_count;
+    let mut register_file = RegisterFile::new();
 
     while count > 0 {
         let instruction = decode_instruction(&context, memory, &mut at);
@@ -98,10 +96,10 @@ pub fn disasm_8086(memory: &Memory, disasm_byte_count: u32, disasm_start: Segmen
         if count >= instruction.size {
             count -= instruction.size;
         } else {
-            // eprintln!("ERROR: Instruction extends outside disassembly region");
             break;
         }
 
+        execute_instruction(&instruction, memory, &mut register_file)?;
         context.update(&instruction);
         
         if is_printable(&instruction) {
@@ -109,6 +107,7 @@ pub fn disasm_8086(memory: &Memory, disasm_byte_count: u32, disasm_start: Segmen
             println!();
         }
     }
+    register_file.print_state();
 
     Ok(())
 }
