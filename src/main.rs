@@ -2,7 +2,7 @@ use std::io::{self, Write};
 
 use sim86::{
     decoder::{
-        Instruction, InstructionFlag, OperandType,
+        Instruction, InstructionFlag, Operand,
         DisasmContext, decode_instruction,
     },
     memory::{Memory, SegmentedAccess},
@@ -35,41 +35,45 @@ pub fn print_instruction(instruction: &Instruction, output: &mut dyn Write) -> i
 
     let mut separator = "";
     for operand in &instruction.operands {
-        if operand.operand_type != OperandType::None {
+        if *operand != Operand::None {
             write!(output, "{}", separator)?;
             separator = ", ";
 
-            match operand.operand_type {
-                OperandType::None => {}
-                OperandType::Register => {
-                    write!(output, "{}", operand.register.index.get_name(operand.register.offset, operand.register.count))?;
+            match operand {
+                Operand::None => {}
+                Operand::Register(reg) => {
+                    write!(output, "{}", reg.index.get_name(reg.offset, reg.count))?;
                 }
-                OperandType::Memory => {
-                    let address = operand.address;
-
-                    if instruction.operands[0].operand_type != OperandType::Register
-                        && instruction.operands[1].operand_type != OperandType::Register
-                        && instruction.operands[0].operand_type != OperandType::RelativeImmediate
-                        && instruction.operands[1].operand_type != OperandType::RelativeImmediate
+                Operand::Memory(address) => {
+                    // Word/byte size hint logic
+                    if !matches!(instruction.operands[0], Operand::Register(_))
+                        && !matches!(instruction.operands[1], Operand::Register(_))
+                        && !matches!(instruction.operands[0], Operand::RelativeImmediate(_))
+                        && !matches!(instruction.operands[1], Operand::RelativeImmediate(_))
                     {
                         write!(output, "{} ", if w { "word" } else { "byte" })?;
                     }
 
+                    // Segment prefix
                     if (flags & InstructionFlag::SEGMENT) != 0 {
                         write!(output, "{}:", address.segment.get_name(0, 2))?;
                     }
 
+                    // Address formatting
                     write!(output, "[{}", address.base.expression())?;
                     if address.displacement != 0 {
                         write!(output, "{:+}", address.displacement)?;
                     }
                     write!(output, "]")?;
                 }
-                OperandType::Immediate => {
-                    write!(output, "{}", operand.immediate_s32)?;
+                Operand::ImmediateU32(val) => {
+                    write!(output, "{}", val)?;
                 }
-                OperandType::RelativeImmediate => {
-                    write!(output, "${:+}", operand.immediate_s32)?;
+                Operand::ImmediateS32(val) => {
+                    write!(output, "{}", val)?;
+                }
+                Operand::RelativeImmediate(offset) => {
+                    write!(output, "${:+}", offset)?;
                 }
             }
         }

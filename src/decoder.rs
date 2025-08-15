@@ -1,6 +1,6 @@
 use crate::{
     instruction_formats::{
-        get_instruction_formats, InstructionBits, InstructionBitsUsage, InstructionFormat, OperationType
+        get_instruction_formats, InstructionBitsUsage, InstructionFormat, OperationType
     }, memory::{Memory, SegmentedAccess}
 };
 
@@ -106,14 +106,14 @@ impl EffectiveAddressBase {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EffectiveAddressExpression {
     pub segment: RegisterIndex,
     pub base: EffectiveAddressBase,
     pub displacement: i32,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RegisterAccess {
     pub index: RegisterIndex,
     pub offset: u8,
@@ -121,40 +121,18 @@ pub struct RegisterAccess {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum OperandType {
+pub enum Operand {
     None,
-    Register,
-    Memory,
-    Immediate,
-    RelativeImmediate,
+    Register(RegisterAccess),
+    Memory(EffectiveAddressExpression),
+    ImmediateU32(u32),
+    ImmediateS32(i32),
+    RelativeImmediate(i32),
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct InstructionOperand {
-    pub operand_type: OperandType,
-    pub address: EffectiveAddressExpression,
-    pub register: RegisterAccess,
-    pub immediate_u32: u32,
-    pub immediate_s32: i32,
-}
-
-impl Default for InstructionOperand {
+impl Default for Operand {
     fn default() -> Self {
-        Self {
-            operand_type: OperandType::None,
-            address: EffectiveAddressExpression {
-                segment: RegisterIndex::None,
-                base: EffectiveAddressBase::Direct,
-                displacement: 0,
-            },
-            register: RegisterAccess {
-                index: RegisterIndex::None,
-                offset: 0,
-                count: 0,
-            },
-            immediate_u32: 0,
-            immediate_s32: 0,
-        }
+        Operand::None
     }
 }
 
@@ -164,7 +142,7 @@ pub struct Instruction {
     pub size: u32,
     pub op: OperationType,
     pub flags: u32,
-    pub operands: [InstructionOperand; 2],
+    pub operands: [Operand; 2],
 }
 
 impl Default for Instruction {
@@ -174,7 +152,7 @@ impl Default for Instruction {
             size: 0,
             op: OperationType::None,
             flags: 0,
-            operands: [InstructionOperand::default(); 2],
+            operands: [Operand::default(); 2],
         }
     }
 }
@@ -202,7 +180,10 @@ impl DisasmContext {
             }
             OperationType::Segment => {
                 self.additional_flags |= InstructionFlag::SEGMENT;
-                self.default_segment = instruction.operands[1].register.index;
+                self.default_segment = match instruction.operands[1] {
+                    Operand::Register(reg) => reg.index,
+                    _ => unreachable!(),
+                };
             }
             _ => {
                 self.additional_flags = 0;
@@ -212,7 +193,7 @@ impl DisasmContext {
     }
 }
 
-fn get_reg_operand(intel_reg_index: u32, wide: bool) -> InstructionOperand {
+fn get_reg_operand(intel_reg_index: u32, wide: bool) -> Operand {
     let reg_table = [
         [(RegisterIndex::A, 0, 1), (RegisterIndex::A, 0, 2)],
         [(RegisterIndex::C, 0, 1), (RegisterIndex::C, 0, 2)],
@@ -225,16 +206,12 @@ fn get_reg_operand(intel_reg_index: u32, wide: bool) -> InstructionOperand {
     ];
 
     let (index, offset, count) = reg_table[(intel_reg_index & 0x7) as usize][if wide { 1 } else { 0 }];
-    
-    InstructionOperand {
-        operand_type: OperandType::Register,
-        register: RegisterAccess {
-            index,
-            offset,
-            count,
-        },
-        ..Default::default()
-    }
+ 
+    Operand::Register(RegisterAccess {
+        index,
+        offset,
+        count,
+    })
 }
 
 fn parse_data_value(memory: &Memory, access: &mut SegmentedAccess, exists: bool, wide: bool, sign_extended: bool) -> u32 {
@@ -342,9 +319,8 @@ fn try_decode(context: &DisasmContext, format: &InstructionFormat, memory: &Memo
 
     // Handle segment register
     if (has_bits & (1 << (InstructionBitsUsage::Sr as usize))) != 0 {
-        instruction.operands[reg_operand_index].operand_type = OperandType::Register;
         let sr_val = bits[InstructionBitsUsage::Sr as usize] & 0x3;
-        instruction.operands[reg_operand_index].register = RegisterAccess {
+        instruction.operands[reg_operand_index] = Operand::Register(RegisterAccess {
             index: match sr_val {
                 0 => RegisterIndex::Es,
                 1 => RegisterIndex::Cs,
@@ -354,7 +330,7 @@ fn try_decode(context: &DisasmContext, format: &InstructionFormat, memory: &Memo
             },
             offset: 0,
             count: 2,
-        };
+        });
     }
 
     // Handle REG field
@@ -367,14 +343,11 @@ fn try_decode(context: &DisasmContext, format: &InstructionFormat, memory: &Memo
         if mod_val == 0b11 {
             instruction.operands[mod_operand_index] = get_reg_operand(rm, w || bits[InstructionBitsUsage::RmRegAlwaysW as usize] != 0);
         } else {
-            instruction.operands[mod_operand_index].operand_type = OperandType::Memory;
-            instruction.operands[mod_operand_index].address.segment = context.default_segment;
-            instruction.operands[mod_operand_index].address.displacement = displacement as i32;
 
-            if (mod_val == 0b00) && (rm == 0b110) {
-                instruction.operands[mod_operand_index].address.base = EffectiveAddressBase::Direct;
+            let base = if (mod_val == 0b00) && (rm == 0b110) {
+                EffectiveAddressBase::Direct
             } else {
-                instruction.operands[mod_operand_index].address.base = match rm {
+                match rm {
                     0 => EffectiveAddressBase::BxSi,
                     1 => EffectiveAddressBase::BxDi,
                     2 => EffectiveAddressBase::BpSi,
@@ -384,35 +357,40 @@ fn try_decode(context: &DisasmContext, format: &InstructionFormat, memory: &Memo
                     6 => EffectiveAddressBase::Bp,
                     7 => EffectiveAddressBase::Bx,
                     _ => EffectiveAddressBase::Direct,
-                };
-            }
+                }
+            };
+
+            instruction.operands[mod_operand_index] = Operand::Memory(
+                EffectiveAddressExpression {
+                    segment: context.default_segment,
+                    base,
+                    displacement: displacement as i32,
+                }
+            );
         }
     }
 
     // Handle additional operands
-    let last_operand_index = if instruction.operands[0].operand_type != OperandType::None { 1 } else { 0 };
+    let last_operand_index = if instruction.operands[0] != Operand::None { 1 } else { 0 };
 
     if bits[InstructionBitsUsage::RelJmpDisp as usize] != 0 {
-        instruction.operands[last_operand_index].operand_type = OperandType::RelativeImmediate;
-        instruction.operands[last_operand_index].immediate_s32 = displacement as i32 + instruction.size as i32;
+        instruction.operands[last_operand_index] = Operand::RelativeImmediate(displacement as i32 + instruction.size as i32);
     }
 
     if bits[InstructionBitsUsage::HasData as usize] != 0 {
-        instruction.operands[last_operand_index].operand_type = OperandType::Immediate;
-        instruction.operands[last_operand_index].immediate_s32 = bits[InstructionBitsUsage::Data as usize] as i32;
+        instruction.operands[last_operand_index] = Operand::ImmediateS32(bits[InstructionBitsUsage::Data as usize] as i32);
     }
 
     if (has_bits & (1 << (InstructionBitsUsage::V as usize))) != 0 {
         if bits[InstructionBitsUsage::V as usize] != 0 {
-            instruction.operands[last_operand_index].operand_type = OperandType::Register;
-            instruction.operands[last_operand_index].register = RegisterAccess {
+            instruction.operands[last_operand_index] = Operand::Register(
+                RegisterAccess {
                 index: RegisterIndex::C,
                 offset: 0,
                 count: 1,
-            };
-        } else {
-            instruction.operands[last_operand_index].operand_type = OperandType::Immediate;
-            instruction.operands[last_operand_index].immediate_s32 = 1;
+            });
+        } else { 
+            instruction.operands[last_operand_index] = Operand::ImmediateS32(1);
         }
     }
 
