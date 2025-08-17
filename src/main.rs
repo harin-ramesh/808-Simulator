@@ -5,7 +5,7 @@ use sim86::{
         decode_instruction, DisasmContext, Instruction, InstructionFlag, Operand,
     }, 
     instruction_formats::OperationType, memory::{Memory, SegmentedAccess},
-    register::RegisterFile,
+    register::{RegisterFile, RegisterAccess, RegisterIndex},
     execution_unit::execute_instruction,
 };
 
@@ -82,31 +82,37 @@ pub fn print_instruction(instruction: &Instruction, output: &mut dyn Write) -> i
 pub fn disasm_8086(memory: &Memory, disasm_byte_count: u32, disasm_start: SegmentedAccess) -> io::Result<()> {
     let mut at = disasm_start;
     let mut context = DisasmContext::new();
-    let mut count = disasm_byte_count;
     let mut register_file = RegisterFile::new();
 
-    while count > 0 {
+    register_file.update_ip(disasm_start.get_absolute_address(0) as u16);
+    let starting_address = disasm_start.get_absolute_address(0);
+
+    loop {
+        at.segment_offset = register_file.get_register_value(&RegisterAccess {index: RegisterIndex::IP, offset: 0, count: 2});
+
         let instruction = decode_instruction(&context, memory, &mut at);
-        
+
         if instruction.op == OperationType::None {
             eprintln!("ERROR: Unrecognized binary in instruction stream.");
             break;
         }
 
-        if count >= instruction.size {
-            count -= instruction.size;
-        } else {
+        register_file.update_ip(instruction.size as u16);
+        let current_address = at.get_absolute_address(0);
+
+        if current_address - starting_address >= disasm_byte_count {
             break;
         }
 
         execute_instruction(&instruction, memory, &mut register_file)?;
         context.update(&instruction);
-        
+
         if is_printable(&instruction) {
             print_instruction(&instruction, &mut io::stdout())?;
             println!();
         }
     }
+
     register_file.print_state();
 
     Ok(())

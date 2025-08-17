@@ -314,6 +314,15 @@ impl RegisterFile {
         }
     }
 
+    pub fn update_ip(&mut self, value: u16) {
+        let next_inst_location = self.get_register_value(&RegisterAccess {index: RegisterIndex::IP, offset: 0, count: 2}) + value;
+        self.update_register(&RegisterAccess {index: RegisterIndex::IP, offset: 0, count: 2}, next_inst_location);
+    }
+
+    pub fn get_ip(&mut self) -> u16 {
+        self.get_register_value(&RegisterAccess {index: RegisterIndex::IP, offset: 0, count: 2})
+    }
+
     fn set_flags_add(&mut self, src: u16, dst: u16, res: u16) {
         self.set_flag(Flag::Zero, res == 0);
         self.set_flag(Flag::Sign, (res & 0x8000) != 0);

@@ -301,7 +301,6 @@ pub fn decode_instruction(context: &DisasmContext, memory: &Memory, at: &mut Seg
     
     for format in &instruction_formats {
         if let Some(instruction) = try_decode(context, format, memory, *at) {
-            at.segment_offset += instruction.size as u16;
             return instruction;
         }
     }
