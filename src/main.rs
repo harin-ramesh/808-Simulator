@@ -84,8 +84,8 @@ pub fn disasm_8086(memory: &Memory, disasm_byte_count: u32, disasm_start: Segmen
     let mut context = DisasmContext::new();
     let mut register_file = RegisterFile::new();
 
-    register_file.update_ip(disasm_start.get_absolute_address(0) as u16);
     let starting_address = disasm_start.get_absolute_address(0);
+    register_file.update_ip(starting_address as u16);
 
     loop {
         at.segment_offset = register_file.get_register_value(&RegisterAccess {index: RegisterIndex::IP, offset: 0, count: 2});
